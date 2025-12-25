@@ -1,30 +1,28 @@
-const { SlashCommandBuilder } = require("discord.js");
-const db = require("../database");
+require("dotenv").config();
+const fs = require("fs");
+const { REST, Routes } = require("discord.js");
 
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName("leaderboard")
-    .setDescription("View top users by points"),
+const commands = [];
+const commandFiles = fs.readdirSync("./slash").filter(f => f.endsWith(".js"));
 
-  async execute(interaction) {
-    const rows = db.prepare(
-      "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
-    ).all();
+for (const file of commandFiles) {
+  const command = require(`./slash/${file}`);
+  commands.push(command.data.toJSON());
+}
 
-    if (rows.length === 0) {
-      return interaction.reply("No leaderboard data yet.");
-    }
+const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
-    let text = "**🏆 Leaderboard**\n\n";
+(async () => {
+  try {
+    console.log("⏳ Deploying slash commands...");
 
-    for (let i = 0; i < rows.length; i++) {
-      const user = await interaction.client.users
-        .fetch(rows[i].user_id)
-        .catch(() => null);
+    await rest.put(
+      Routes.applicationCommands(process.env.CLIENT_ID),
+      { body: commands }
+    );
 
-      text += `${i + 1}. ${user ? user.tag : "Unknown User"} — **${rows[i].points}** points\n`;
-    }
-
-    await interaction.reply(text);
+    console.log("✅ Slash commands deployed!");
+  } catch (error) {
+    console.error(error);
   }
-};
+})();
