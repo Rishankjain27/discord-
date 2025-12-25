@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require("discord.js");
-const db = require("../database");
+const Database = require("better-sqlite3");
+const db = new Database("database.db");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -11,14 +12,15 @@ module.exports = {
     const cooldown = 24 * 60 * 60 * 1000;
 
     const row = db.prepare(
-      "SELECT points, last_daily FROM users WHERE user_id = ?"
+      "SELECT last_daily FROM users WHERE user_id = ?"
     ).get(interaction.user.id);
 
     if (row && now - row.last_daily < cooldown) {
-      const remaining = cooldown - (now - row.last_daily);
-      const hours = Math.ceil(remaining / (60 * 60 * 1000));
+      const hours = Math.ceil(
+        (cooldown - (now - row.last_daily)) / 3600000
+      );
       return interaction.reply({
-        content: `⏳ You can claim daily again in **${hours} hours**.`,
+        content: `⏳ Try again in **${hours} hours**`,
         ephemeral: true
       });
     }
@@ -27,9 +29,9 @@ module.exports = {
       INSERT INTO users (user_id, points, last_daily)
       VALUES (?, 10, ?)
       ON CONFLICT(user_id)
-      DO UPDATE SET points = points + 1, last_daily = ?
+      DO UPDATE SET points = points + 10, last_daily = ?
     `).run(interaction.user.id, now, now);
 
-    await interaction.reply("🎉 You received **10 daily points**!");
+    interaction.reply("🎉 You received **10 daily points**!");
   }
 };
