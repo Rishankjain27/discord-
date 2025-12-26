@@ -1,17 +1,18 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
 const {
   Client,
   GatewayIntentBits,
-  PermissionsBitField,
-  EmbedBuilder,
-  SlashCommandBuilder,
+  Collection,
   REST,
   Routes,
   Events
 } = require("discord.js");
 
 const Database = require("better-sqlite3");
+
 const PREFIX = "$";
 
 /* ================= DATABASE ================= */
@@ -33,102 +34,69 @@ const client = new Client({
   ]
 });
 
-/* ================= SHARED LOGIC ================= */
-function claimDaily(userId) {
-  const now = Date.now();
-  const cooldown = 86400000;
+client.slashCommands = new Collection();
+client.prefixCommands = new Collection();
+client.db = db;
 
-  const row = db.prepare(
-    "SELECT last_daily FROM users WHERE user_id = ?"
-  ).get(userId);
+/* ================= LOAD SLASH COMMANDS ================= */
+const slashPath = path.join(__dirname, "commands/slash");
+const slashFiles = fs.readdirSync(slashPath).filter(f => f.endsWith(".js"));
 
-  if (row && now - row.last_daily < cooldown) {
-    return { ok: false, hours: Math.ceil((cooldown - (now - row.last_daily)) / 3600000) };
-  }
+const slashData = [];
 
-  db.prepare(`
-    INSERT INTO users (user_id, points, last_daily)
-    VALUES (?, 10, ?)
-    ON CONFLICT(user_id)
-    DO UPDATE SET points = points + 10, last_daily = ?
-  `).run(userId, now, now);
-
-  return { ok: true };
+for (const file of slashFiles) {
+  const command = require(`${slashPath}/${file}`);
+  client.slashCommands.set(command.data.name, command);
+  slashData.push(command.data.toJSON());
 }
 
-function getLeaderboard() {
-  return db.prepare(
-    "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
-  ).all();
+/* ================= LOAD PREFIX COMMANDS ================= */
+const prefixPath = path.join(__dirname, "commands/prefix");
+const prefixFiles = fs.readdirSync(prefixPath).filter(f => f.endsWith(".js"));
+
+for (const file of prefixFiles) {
+  const command = require(`${prefixPath}/${file}`);
+  client.prefixCommands.set(command.name, command);
 }
 
-/* ================= SLASH COMMANDS ================= */
-const slashCommands = [
-  new SlashCommandBuilder().setName("daily").setDescription("Claim daily points"),
-  new SlashCommandBuilder().setName("leaderboard").setDescription("View leaderboard")
-].map(c => c.toJSON());
-
+/* ================= READY ================= */
 client.once(Events.ClientReady, async () => {
-  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
+  const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
   await rest.put(
-    Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-    { body: slashCommands }
+    Routes.applicationGuildCommands(
+      process.env.CLIENT_ID,
+      process.env.GUILD_ID
+    ),
+    { body: slashData }
   );
 
-  console.log("✅ Bot online + slash commands registered");
+  console.log("✅ Slash commands registered");
 });
 
 /* ================= SLASH HANDLER ================= */
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  if (interaction.commandName === "daily") {
-    const result = claimDaily(interaction.user.id);
-    return result.ok
-      ? interaction.reply("🎉 You received **10 daily points**!")
-      : interaction.reply({ content: `⏳ Try again in **${result.hours} hours**`, ephemeral: true });
-  }
+  const command = client.slashCommands.get(interaction.commandName);
+  if (!command) return;
 
-  if (interaction.commandName === "leaderboard") {
-    const rows = getLeaderboard();
-    if (!rows.length) return interaction.reply("No data yet.");
-
-    let text = "**🏆 Leaderboard**\n\n";
-    for (let i = 0; i < rows.length; i++) {
-      const user = await client.users.fetch(rows[i].user_id).catch(() => null);
-      text += `${i + 1}. ${user ? user.tag : "Unknown"} – **${rows[i].points}**\n`;
-    }
-    interaction.reply(text);
-  }
+  await command.execute(interaction, client);
 });
 
 /* ================= PREFIX HANDLER ================= */
 client.on("messageCreate", async message => {
   if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
-  const args = message.content.slice(1).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const cmdName = args.shift().toLowerCase();
 
-  if (command === "daily") {
-    const result = claimDaily(message.author.id);
-    return message.reply(
-      result.ok
-        ? "🎉 You received **10 daily points**!"
-        : `⏳ Try again in **${result.hours} hours**`
-    );
-  }
+  const command = client.prefixCommands.get(cmdName);
+  if (!command) return;
 
-  if (command === "leaderboard") {
-    const rows = getLeaderboard();
-    if (!rows.length) return message.reply("No data yet.");
+  await command.execute(message, args, client);
+});
 
-    let text = "**🏆 Leaderboard**\n\n";
-    for (let i = 0; i < rows.length; i++) {
-      const user = await client.users.fetch(rows[i].user_id).catch(() => null);
-      text += `${i + 1}. ${user ? user.tag : "Unknown"} – **${rows[i].points}**\n`;
-    }
-    return message.reply(text);
-  }
-
-  if (co
+/* ================= LOGIN ================= */
+client.login(process.env.TOKEN);
