@@ -29,9 +29,11 @@ module.exports = {
       INSERT INTO users (user_id, points, last_daily)
       VALUES (?, 10, ?)
       ON CONFLICT(user_id)
-      DO UPDATE SET points = points + 10, last_daily = ?
+      DO UPDATE SET points = points + 1, last_daily = ?
     `).run(interaction.user.id, now, now);
 
-    interaction.reply("🎉 You received **10 daily points**!");
+    interaction.reply("🎉 You received **1 daily points**!");
   }
 };
+
+
