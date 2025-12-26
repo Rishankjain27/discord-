@@ -1,28 +1,44 @@
+const { SlashCommandBuilder } = require("discord.js");
+const db = require("../database");
+
+const DAILY_POINTS = 100;
+const COOLDOWN = 24 * 60 * 60 * 1000;
+
 module.exports = {
-  name: "daily",
-  async execute(message, args, client) {
-    const db = client.db;
+  data: new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Claim daily points"),
+
+  async execute(interaction) {
+    const userId = interaction.user.id;
     const now = Date.now();
-    const cooldown = 86400000;
 
-    const row = db
-      .prepare("SELECT last_daily FROM users WHERE user_id = ?")
-      .get(message.author.id);
+    const user = db
+      .prepare("SELECT * FROM users WHERE user_id = ?")
+      .get(userId);
 
-    if (row && now - row.last_daily < cooldown) {
-      const hours = Math.ceil(
-        (cooldown - (now - row.last_daily)) / 3600000
-      );
-      return message.reply(`⏳ Try again in **${hours} hours**`);
+    if (!user) {
+      db.prepare(
+        "INSERT INTO users (user_id, points, last_daily) VALUES (?, ?, ?)"
+      ).run(userId, DAILY_POINTS, now);
+
+      return interaction.reply(`You received **${DAILY_POINTS} points**.`);
     }
 
-    db.prepare(`
-      INSERT INTO users (user_id, points, last_daily)
-      VALUES (?, 10, ?)
-      ON CONFLICT(user_id)
-      DO UPDATE SET points = points + 1, last_daily = ?
-    `).run(message.author.id, now, now);
+    if (now - user.last_daily < COOLDOWN) {
+      const hours = Math.ceil(
+        (COOLDOWN - (now - user.last_daily)) / 3600000
+      );
+      return interaction.reply({
+        content: `Come back in **${hours} hours**.`,
+        ephemeral: true
+      });
+    }
 
-    message.reply("🎉 You received **1 daily points**!");
+    db.prepare(
+      "UPDATE users SET points = points + ?, last_daily = ? WHERE user_id = ?"
+    ).run(DAILY_POINTS, now, userId);
+
+    interaction.reply(`You received **${DAILY_POINTS} points**.`);
   }
 };
