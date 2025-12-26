@@ -12,12 +12,10 @@ const {
 } = require("discord.js");
 
 const Database = require("better-sqlite3");
-
 const PREFIX = "$";
 
 /* ================= DATABASE ================= */
 const db = new Database("database.db");
-
 db.prepare(`
   CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
@@ -35,207 +33,102 @@ const client = new Client({
   ]
 });
 
+/* ================= SHARED LOGIC ================= */
+function claimDaily(userId) {
+  const now = Date.now();
+  const cooldown = 86400000;
+
+  const row = db.prepare(
+    "SELECT last_daily FROM users WHERE user_id = ?"
+  ).get(userId);
+
+  if (row && now - row.last_daily < cooldown) {
+    return { ok: false, hours: Math.ceil((cooldown - (now - row.last_daily)) / 3600000) };
+  }
+
+  db.prepare(`
+    INSERT INTO users (user_id, points, last_daily)
+    VALUES (?, 10, ?)
+    ON CONFLICT(user_id)
+    DO UPDATE SET points = points + 10, last_daily = ?
+  `).run(userId, now, now);
+
+  return { ok: true };
+}
+
+function getLeaderboard() {
+  return db.prepare(
+    "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
+  ).all();
+}
+
 /* ================= SLASH COMMANDS ================= */
 const slashCommands = [
-  new SlashCommandBuilder()
-    .setName("daily")
-    .setDescription("Claim daily points"),
+  new SlashCommandBuilder().setName("daily").setDescription("Claim daily points"),
+  new SlashCommandBuilder().setName("leaderboard").setDescription("View leaderboard")
+].map(c => c.toJSON());
 
-  new SlashCommandBuilder()
-    .setName("leaderboard")
-    .setDescription("View top users")
-].map(cmd => cmd.toJSON());
-
-/* ================= READY ================= */
 client.once(Events.ClientReady, async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-
   const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
   await rest.put(
-    Routes.applicationGuildCommands(
-      process.env.CLIENT_ID,
-      process.env.GUILD_ID
-    ),
+    Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
     { body: slashCommands }
   );
 
-  console.log("✅ Slash commands registered");
+  console.log("✅ Bot online + slash commands registered");
 });
 
 /* ================= SLASH HANDLER ================= */
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  // DAILY
   if (interaction.commandName === "daily") {
-    const now = Date.now();
-    const cooldown = 24 * 60 * 60 * 1000;
-
-    const row = db.prepare(
-      "SELECT last_daily FROM users WHERE user_id = ?"
-    ).get(interaction.user.id);
-
-    if (row && now - row.last_daily < cooldown) {
-      const hours = Math.ceil(
-        (cooldown - (now - row.last_daily)) / 3600000
-      );
-      return interaction.reply({
-        content: `⏳ Try again in **${hours} hours**`,
-        ephemeral: true
-      });
-    }
-
-    db.prepare(`
-      INSERT INTO users (user_id, points, last_daily)
-      VALUES (?, 10, ?)
-      ON CONFLICT(user_id)
-      DO UPDATE SET points = points + 10, last_daily = ?
-    `).run(interaction.user.id, now, now);
-
-    return interaction.reply("🎉 You received **10 daily points**!");
+    const result = claimDaily(interaction.user.id);
+    return result.ok
+      ? interaction.reply("🎉 You received **10 daily points**!")
+      : interaction.reply({ content: `⏳ Try again in **${result.hours} hours**`, ephemeral: true });
   }
 
-  // LEADERBOARD
   if (interaction.commandName === "leaderboard") {
-    const rows = db.prepare(
-      "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
-    ).all();
-
-    if (!rows.length)
-      return interaction.reply("No leaderboard data yet.");
+    const rows = getLeaderboard();
+    if (!rows.length) return interaction.reply("No data yet.");
 
     let text = "**🏆 Leaderboard**\n\n";
     for (let i = 0; i < rows.length; i++) {
       const user = await client.users.fetch(rows[i].user_id).catch(() => null);
       text += `${i + 1}. ${user ? user.tag : "Unknown"} – **${rows[i].points}**\n`;
     }
-
-    return interaction.reply(text);
+    interaction.reply(text);
   }
 });
 
 /* ================= PREFIX HANDLER ================= */
 client.on("messageCreate", async message => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(PREFIX)) return;
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const args = message.content.slice(1).trim().split(/ +/);
   const command = args.shift().toLowerCase();
 
-  // HELP
-  if (command === "help") {
+  if (command === "daily") {
+    const result = claimDaily(message.author.id);
     return message.reply(
-      "**📘 Commands**\n\n" +
-      "**Slash Commands**\n" +
-      "`/daily` – Claim daily points\n" +
-      "`/leaderboard` – Top users\n\n" +
-      "**Prefix Commands**\n" +
-      "`$points` – Check points\n" +
-      "`$addpoints @user amount` – Admin\n" +
-      "`$removepoints @user amount` – Admin\n" +
-      "`$delete amount` – Delete messages\n" +
-      "`$say message` – Bot speaks\n" +
-      "`$announce message` – Announcement"
+      result.ok
+        ? "🎉 You received **10 daily points**!"
+        : `⏳ Try again in **${result.hours} hours**`
     );
   }
 
-  // POINTS
-  if (command === "points") {
-    const row = db.prepare(
-      "SELECT points FROM users WHERE user_id = ?"
-    ).get(message.author.id);
+  if (command === "leaderboard") {
+    const rows = getLeaderboard();
+    if (!rows.length) return message.reply("No data yet.");
 
-    return message.reply(`⭐ You have **${row ? row.points : 0} points**`);
+    let text = "**🏆 Leaderboard**\n\n";
+    for (let i = 0; i < rows.length; i++) {
+      const user = await client.users.fetch(rows[i].user_id).catch(() => null);
+      text += `${i + 1}. ${user ? user.tag : "Unknown"} – **${rows[i].points}**\n`;
+    }
+    return message.reply(text);
   }
 
-  // ADD POINTS
-  if (command === "addpoints") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
-      return message.reply("❌ Admin only");
-
-    const user = message.mentions.users.first();
-    const amount = parseInt(args[1]);
-
-    if (!user || isNaN(amount))
-      return message.reply("Usage: `$addpoints @user amount`");
-
-    db.prepare(`
-      INSERT INTO users (user_id, points)
-      VALUES (?, ?)
-      ON CONFLICT(user_id)
-      DO UPDATE SET points = points + ?
-    `).run(user.id, amount, amount);
-
-    message.reply(`✅ Added **${amount} points** to ${user.tag}`);
-  }
-
-  // REMOVE POINTS
-  if (command === "removepoints") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
-      return message.reply("❌ Admin only");
-
-    const user = message.mentions.users.first();
-    const amount = parseInt(args[1]);
-
-    if (!user || isNaN(amount))
-      return message.reply("Usage: `$removepoints @user amount`");
-
-    const row = db.prepare(
-      "SELECT points FROM users WHERE user_id = ?"
-    ).get(user.id);
-
-    const newPoints = Math.max(0, (row?.points || 0) - amount);
-
-    db.prepare(
-      "UPDATE users SET points = ? WHERE user_id = ?"
-    ).run(newPoints, user.id);
-
-    message.reply(`❌ New balance: **${newPoints}**`);
-  }
-
-  // DELETE
-  if (command === "delete") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages))
-      return message.reply("❌ Missing permission");
-
-    const amount = parseInt(args[0]);
-    if (!amount || amount < 1 || amount > 100)
-      return message.reply("Usage: `$delete 1-100`");
-
-    await message.channel.bulkDelete(amount, true);
-  }
-
-  // SAY
-  if (command === "say") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
-      return message.reply("❌ Admin only");
-
-    const text = args.join(" ");
-    if (!text) return;
-
-    await message.delete();
-    message.channel.send(text);
-  }
-
-  // ANNOUNCE
-  if (command === "announce") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
-      return message.reply("❌ Admin only");
-
-    const text = args.join(" ");
-    if (!text) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle("📢 Announcement")
-      .setDescription(text)
-      .setColor(0xff0000)
-      .setTimestamp();
-
-    await message.delete();
-    message.channel.send({ embeds: [embed] });
-  }
-});
-
-/* ================= LOGIN ================= */
-client.login(process.env.TOKEN);
+  if (co
