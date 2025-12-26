@@ -1,15 +1,21 @@
-module.exports = {
-  name: "help",
-  async execute(message) {
-    message.reply(
-      "**📘 Help Menu**\n\n" +
-      "`$ping` – Test bot\n" +
-      "`$points` – Check points\n" +
-      "`$daily` – Daily reward\n" +
-      "`$leaderboard` – Top users\n" +
-      "`$addpoints @user amount` – Admin\n" +
-      "`$removepoints @user amount` – Admin\n" +
-      "`$poll question | option1 | option2` – Create poll"
-    );
-  }
-};
+// ---------- HELP ----------
+if (command === "help") {
+  await message.reply(
+    "**📘 Bot Commands Help**\n\n" +
+
+    "**🎯 Points System**\n" +
+    "`$points` → Check your points\n" +
+    "`$daily` → Claim daily points\n" +
+    "`$leaderboard` → View top users\n\n" +
+
+    "**🛠 Admin Commands**\n" +
+    "`$addpoints @user amount` → Add points\n" +
+    "`$removepoints @user amount` → Remove points\n" +
+    "`$delete number` → Delete messages\n\n" +
+
+    "**📢 Messaging & Announcements**\n" +
+    "`$say message` → Bot sends a message\n" +
+    "`$announce message` → Announcement embed\n"
+  );
+  return; // 🔴 VERY IMPORTANT
+}
