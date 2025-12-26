@@ -1,27 +1,21 @@
 require("dotenv").config();
-const fs = require("fs");
 const { REST, Routes } = require("discord.js");
 
-const commands = [];
-const commandFiles = fs.readdirSync("./slash").filter(f => f.endsWith(".js"));
-
-for (const file of commandFiles) {
-  const command = require(`./slash/${file}`);
-  commands.push(command.data.toJSON());
-}
-
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    console.log("⏳ Deploying slash commands...");
+    console.log("Deploying guild commands...");
 
     await rest.put(
-      Routes.applicationCommands(process.env.CLIENT_ID),
+      Routes.applicationGuildCommands(
+        process.env.CLIENT_ID,
+        process.env.GUILD_ID
+      ),
       { body: commands }
     );
 
-    console.log("✅ Slash commands deployed!");
+    console.log("Guild commands deployed successfully.");
   } catch (error) {
     console.error(error);
   }
