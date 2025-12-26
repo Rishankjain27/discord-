@@ -1,10 +1,18 @@
-module.exports = {
-  name: "points",
-  async execute(message, args, client) {
-    const row = client.db
-      .prepare("SELECT points FROM users WHERE user_id = ?")
-      .get(message.author.id);
+const { SlashCommandBuilder } = require("discord.js");
+const db = require("../database");
 
-    message.reply(`⭐ You have **${row ? row.points : 0} points**`);
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName("points")
+    .setDescription("Check your points"),
+
+  async execute(interaction) {
+    const user = db
+      .prepare("SELECT points FROM users WHERE user_id = ?")
+      .get(interaction.user.id);
+
+    interaction.reply(
+      `You have **${user ? user.points : 0} points**.`
+    );
   }
 };
