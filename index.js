@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const {
   Client,
   GatewayIntentBits,
@@ -9,12 +10,14 @@ const {
   Routes,
   Events
 } = require("discord.js");
+
 const Database = require("better-sqlite3");
 
 const PREFIX = "$";
 
 /* ================= DATABASE ================= */
 const db = new Database("database.db");
+
 db.prepare(`
   CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
@@ -64,7 +67,7 @@ client.once(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  /* ----- DAILY ----- */
+  // DAILY
   if (interaction.commandName === "daily") {
     const now = Date.now();
     const cooldown = 24 * 60 * 60 * 1000;
@@ -93,7 +96,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.reply("🎉 You received **10 daily points**!");
   }
 
-  /* ----- LEADERBOARD ----- */
+  // LEADERBOARD
   if (interaction.commandName === "leaderboard") {
     const rows = db.prepare(
       "SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10"
@@ -120,8 +123,119 @@ client.on("messageCreate", async message => {
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const command = args.shift().toLowerCase();
 
-  /* ----- HELP ----- */
+  // HELP
   if (command === "help") {
     return message.reply(
-      "**📘 Commands**\n" +
-      "`/dai
+      "**📘 Commands**\n\n" +
+      "**Slash Commands**\n" +
+      "`/daily` – Claim daily points\n" +
+      "`/leaderboard` – Top users\n\n" +
+      "**Prefix Commands**\n" +
+      "`$points` – Check points\n" +
+      "`$addpoints @user amount` – Admin\n" +
+      "`$removepoints @user amount` – Admin\n" +
+      "`$delete amount` – Delete messages\n" +
+      "`$say message` – Bot speaks\n" +
+      "`$announce message` – Announcement"
+    );
+  }
+
+  // POINTS
+  if (command === "points") {
+    const row = db.prepare(
+      "SELECT points FROM users WHERE user_id = ?"
+    ).get(message.author.id);
+
+    return message.reply(`⭐ You have **${row ? row.points : 0} points**`);
+  }
+
+  // ADD POINTS
+  if (command === "addpoints") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("❌ Admin only");
+
+    const user = message.mentions.users.first();
+    const amount = parseInt(args[1]);
+
+    if (!user || isNaN(amount))
+      return message.reply("Usage: `$addpoints @user amount`");
+
+    db.prepare(`
+      INSERT INTO users (user_id, points)
+      VALUES (?, ?)
+      ON CONFLICT(user_id)
+      DO UPDATE SET points = points + ?
+    `).run(user.id, amount, amount);
+
+    message.reply(`✅ Added **${amount} points** to ${user.tag}`);
+  }
+
+  // REMOVE POINTS
+  if (command === "removepoints") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("❌ Admin only");
+
+    const user = message.mentions.users.first();
+    const amount = parseInt(args[1]);
+
+    if (!user || isNaN(amount))
+      return message.reply("Usage: `$removepoints @user amount`");
+
+    const row = db.prepare(
+      "SELECT points FROM users WHERE user_id = ?"
+    ).get(user.id);
+
+    const newPoints = Math.max(0, (row?.points || 0) - amount);
+
+    db.prepare(
+      "UPDATE users SET points = ? WHERE user_id = ?"
+    ).run(newPoints, user.id);
+
+    message.reply(`❌ New balance: **${newPoints}**`);
+  }
+
+  // DELETE
+  if (command === "delete") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages))
+      return message.reply("❌ Missing permission");
+
+    const amount = parseInt(args[0]);
+    if (!amount || amount < 1 || amount > 100)
+      return message.reply("Usage: `$delete 1-100`");
+
+    await message.channel.bulkDelete(amount, true);
+  }
+
+  // SAY
+  if (command === "say") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("❌ Admin only");
+
+    const text = args.join(" ");
+    if (!text) return;
+
+    await message.delete();
+    message.channel.send(text);
+  }
+
+  // ANNOUNCE
+  if (command === "announce") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("❌ Admin only");
+
+    const text = args.join(" ");
+    if (!text) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle("📢 Announcement")
+      .setDescription(text)
+      .setColor(0xff0000)
+      .setTimestamp();
+
+    await message.delete();
+    message.channel.send({ embeds: [embed] });
+  }
+});
+
+/* ================= LOGIN ================= */
+client.login(process.env.TOKEN);
